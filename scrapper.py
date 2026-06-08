@@ -1,208 +1,136 @@
-"""
-Ramraj Cotton Feedback Extractor - ULTRA CLEAN VERSION
-Extracts ONLY meaningful customer feedback sentences
-"""
-
 import asyncio
 import csv
 import re
 from bs4 import BeautifulSoup
 from playwright.async_api import async_playwright
 
-# Real customer review patterns (what actual feedback looks like)
-REVIEW_PATTERNS = [
-    r'I am very happy.*?\.',
-    r'I am satisfied.*?\.',
-    r'I had a very good experience.*?\.',
-    r'I have been using.*?\.',
-    r'I strongly recommend.*?\.',
-    r'I would recommend.*?\.',
-    r'The product (is|was).*?\.',
-    r'Quality product.*?\.',
-    r'Very good product.*?\.',
-    r'Excellent quality.*?\.',
-    r'Nice cloth.*?\.',
-    r'Soft fabric.*?\.',
-    r'Perfect fit.*?\.',
-    r'Very comfortable.*?\.',
-    r'Good quality.*?\.',
-    r'Best quality.*?\.',
-    r'Thanks.*?Quality Product.*?\.',
-    r'Last two years.*?\.',
-    r'The product received.*?\.',
-    r'Damn good quality.*?\.',
-    r'Super quality.*?\.',
-    r'Works great.*?\.',
-]
-
-def extract_real_reviews(text: str) -> list:
-    """Extract only sentences that look like real customer feedback"""
+def final_clean_text(text):
+    """Prunes metadata blocks and normalizes text for NLP models."""
     if not text:
-        return []
-    
-    reviews = []
-    
-    # Try each pattern
-    for pattern in REVIEW_PATTERNS:
-        matches = re.findall(pattern, text, re.IGNORECASE)
-        for match in matches:
-            # Clean up
-            clean = re.sub(r'\s+', ' ', match)
-            clean = clean.strip()
-            if 20 < len(clean) < 300:
-                reviews.append(clean)
-    
-    # Also look for sentences starting with "I" (customer speaking)
-    sentences = re.split(r'[.!?]+', text)
-    for sentence in sentences:
-        sentence = sentence.strip()
-        if len(sentence) > 30 and len(sentence) < 300:
-            if sentence[0] == 'I' or sentence[0:3] == 'I ':
-                # Filter out garbage
-                skip_words = ['review collected', 'store invitation', 'invite', 'thumb', 'verified', 'india']
-                if not any(word in sentence.lower() for word in skip_words):
-                    clean = re.sub(r'\s+', ' ', sentence)
-                    if clean and clean not in reviews:
-                        reviews.append(clean)
-    
-    return reviews
+        return ""
+    text = re.sub(r'^About\s+.*', '', text, flags=re.IGNORECASE)
+    text = re.sub(r'\d{1,2}\s+(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+\d{4}', '', text, flags=re.IGNORECASE)
+    text = re.sub(r'review collected (organically|from invite)', '', text, flags=re.IGNORECASE)
+    return re.sub(r'\s+', ' ', text).strip()
 
-async def extract_from_judgeme(page):
-    """Extract clean reviews from Judge.me"""
-    print("   Loading Judge.me...")
-    await page.goto('https://judge.me/reviews/stores/ramrajcotton.in', wait_until='networkidle', timeout=30000)
-    await page.wait_for_timeout(3000)
-    
-    for _ in range(3):
-        await page.evaluate('window.scrollTo(0, document.body.scrollHeight)')
-        await page.wait_for_timeout(1000)
-    
-    content = await page.content()
-    soup = BeautifulSoup(content, 'html.parser')
-    
-    reviews = []
-    
-    # Get all text from review divs
-    review_divs = soup.find_all('div', class_=re.compile(r'review', re.I))
-    
-    for div in review_divs:
-        text = div.get_text(separator=' ', strip=True)
-        extracted = extract_real_reviews(text)
-        for rev in extracted:
-            if rev not in reviews:
-                reviews.append(rev)
-    
-    # Also get from paragraphs
-    paragraphs = soup.find_all('p')
-    for p in paragraphs:
-        text = p.get_text(strip=True)
-        extracted = extract_real_reviews(text)
-        for rev in extracted:
-            if rev not in reviews:
-                reviews.append(rev)
-    
-    return reviews
+async def get_product_links(page):
+    """Crawl Phase: Discover individual product review directories."""
+    print("🕸️  Crawling main page for product specific links...")
+    product_urls = set()
+    try:
+        await page.goto('https://judge.me/reviews/stores/ramrajcotton.in', wait_until='networkidle', timeout=60000)
+        
+        # Scroll down to load product grids
+        for _ in range(5):
+            await page.evaluate("window.scrollBy(0, 1000);")
+            await asyncio.sleep(1)
+            
+        html = await page.content()
+        soup = BeautifulSoup(html, 'html.parser')
+        
+        # Extract links containing product paths
+        for a in soup.find_all('a', href=True):
+            href = a['href']
+            if '/products/' in href:
+                # Handle relative paths cleanly
+                full_url = href if href.startswith('http') else f"https://judge.me{href}"
+                product_urls.add(full_url)
+                
+    except Exception as e:
+        print(f" ⚠️ Crawl warning: {e}")
+    return list(product_urls)
 
-async def extract_from_ramrajcotton(page):
-    """Extract clean reviews from Ramraj Cotton"""
-    print("   Loading Ramraj Cotton...")
-    await page.goto('https://ramrajcotton.in/pages/store-reviews', wait_until='domcontentloaded', timeout=30000)
-    await page.wait_for_timeout(3000)
-    
-    print("   Scrolling...")
-    for i in range(10):
-        await page.evaluate('window.scrollTo(0, document.body.scrollHeight)')
-        await page.wait_for_timeout(1000)
-    
-    content = await page.content()
-    soup = BeautifulSoup(content, 'html.parser')
-    
+async def scrape_product_page(page, url):
+    """Scrape Phase: Extract targets directly from dynamic product nodes."""
     reviews = []
-    
-    # Get all text
-    all_text = soup.get_text(separator=' ', strip=True)
-    
-    # Extract using patterns
-    extracted = extract_real_reviews(all_text)
-    for rev in extracted:
-        if rev not in reviews:
-            reviews.append(rev)
-    
-    # Also check paragraphs directly
-    paragraphs = soup.find_all('p')
-    for p in paragraphs:
-        text = p.get_text(strip=True)
-        extracted = extract_real_reviews(text)
-        for rev in extracted:
-            if rev not in reviews:
-                reviews.append(rev)
-    
+    try:
+        await page.goto(url, wait_until='load', timeout=30000)
+        await asyncio.sleep(1) # Brief pause for widget hydration
+        
+        # Pull text contexts right out of active browser rendering maps
+        reviews_data = await page.evaluate("""() => {
+            const elements = document.querySelectorAll('.jdgm-rev__body, .jdgm-rev__title');
+            return Array.from(elements).map(el => el.innerText);
+        }""")
+        
+        for raw_text in reviews_data:
+            cleaned = final_clean_text(raw_text)
+            if len(cleaned) > 15 and "verified by" not in cleaned.lower():
+                reviews.append(cleaned)
+    except Exception:
+        pass # Quietly bypass timeouts on broken links to keep loop moving
     return reviews
 
 async def main():
-    print("="*80)
-    print("RAMRAJ COTTON FEEDBACK EXTRACTOR - ULTRA CLEAN VERSION")
-    print("="*80)
-    print("\n📌 Extracting ONLY real customer feedback sentences\n")
+    print("=" * 70)
+    print("DEEP CRAWLER & SCRAPER - BULK VOLUME MODE")
+    print("=" * 70)
     
-    all_feedback = []
-    
+    clean_dataset = []
+    seen = set()
+
     async with async_playwright() as p:
         browser = await p.chromium.launch(headless=True)
-        page = await browser.new_page()
-        
-        print("📦 Source 1: Judge.me Reviews")
-        print("-" * 50)
-        judge_reviews = await extract_from_judgeme(page)
-        url1 = 'https://judge.me/reviews/stores/ramrajcotton.in'
-        for review in judge_reviews:
-            all_feedback.append((url1, review))
-        print(f"   ✅ {len(judge_reviews)} reviews")
-        
-        print("\n📦 Source 2: Ramraj Cotton Official")
-        print("-" * 50)
-        ramraj_reviews = await extract_from_ramrajcotton(page)
-        url2 = 'https://ramrajcotton.in/pages/store-reviews'
-        for review in ramraj_reviews:
-            all_feedback.append((url2, review))
-        print(f"   ✅ {len(ramraj_reviews)} reviews")
-        
+        context = await browser.new_context(
+            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
+        )
+        page = await context.new_page()
+
+        # Step 1: Crawl to build target list
+        discovered_links = await get_product_links(page)
+        print(f"   🎯 Found {len(discovered_links)} product review pathways to harvest.")
+
+        # Step 2: Loop over discovered links to pull distinct reviews
+        print("\n🚀 Beginning mass collection loop...")
+        for idx, url in enumerate(discovered_links, 1):
+            print(f"   [{idx}/{len(discovered_links)}] Scraping deep path...")
+            product_reviews = await scrape_product_page(page, url)
+            
+            for review in product_reviews:
+                if review.lower() not in seen:
+                    seen.add(review.lower())
+                    clean_dataset.append([url, review])
+            
+            # Rate limiting safety to avoid getting blocked by Judge.me
+            await asyncio.sleep(0.5)
+
+        # Step 3: Run the backup official store page scraper to maximize data
+        print("\n📦 Processing Backup Source: Ramraj Cotton Store Reviews...")
+        try:
+            await page.goto('https://ramrajcotton.in/pages/store-reviews', wait_until='load')
+            for _ in range(4):
+                await page.evaluate("window.scrollBy(0, 800);")
+                await asyncio.sleep(0.5)
+            soup = BeautifulSoup(await page.content(), 'html.parser')
+            for p_tag in soup.select('main p, #main p, .shopify-section p'):
+                cleaned = final_clean_text(p_tag.get_text(strip=True))
+                ui_keywords = [
+    'currency', 'sort by', 'filter', 'cancel', 'shipping', 'cookie', 'javascript',
+    'latest news', 'established in 1983', 'get the latest'
+]
+                if len(cleaned) > 20 and not any(k in cleaned.lower() for k in ui_keywords):
+                    if cleaned.lower() not in seen:
+                        seen.add(cleaned.lower())
+                        clean_dataset.append(['https://ramrajcotton.in/pages/store-reviews', cleaned])
+        except Exception as e:
+            print(f"   ⚠️ Store fallback warning: {e}")
+
         await browser.close()
-    
-    # Remove duplicates
-    unique_feedback = []
-    seen = set()
-    for url, fb in all_feedback:
-        key = fb.lower().strip()
-        if key not in seen:
-            seen.add(key)
-            unique_feedback.append((url, fb))
-    
-    # Save to CSV
-    csv_filename = 'ramraj_feedback.csv'
-    with open(csv_filename, 'w', newline='', encoding='utf-8') as f:
-        writer = csv.writer(f)
-        writer.writerow(['URL', 'Feedback'])
-        for url, fb in unique_feedback:
-            writer.writerow([url, fb])
-    
-    print("\n" + "="*80)
-    print("✅ EXTRACTION COMPLETE!")
-    print(f"   Total real customer reviews: {len(unique_feedback)}")
-    print(f"   Saved to: {csv_filename}")
-    
-    if unique_feedback:
-        print("\n📋 CLEAN CUSTOMER REVIEWS:")
-        print("-" * 80)
-        for i, (url, fb) in enumerate(unique_feedback, 1):
-            print(f"\n{i}. {fb}")
-            print(f"   Source: {'Judge.me' if 'judge.me' in url else 'Ramraj Cotton'}")
-        
-        judge_count = sum(1 for url, _ in unique_feedback if 'judge.me' in url)
-        ramraj_count = sum(1 for url, _ in unique_feedback if 'ramrajcotton' in url)
-        print(f"\n📊 Summary: Judge.me: {judge_count} | Ramraj Cotton: {ramraj_count} | Total: {len(unique_feedback)}")
-    
-    print("\n" + "="*80)
+
+    # --- SAVE RESULTS ---
+    output_file = 'ramraj_bulk_clean_feedback.csv'
+    if clean_dataset:
+        with open(output_file, 'w', newline='', encoding='utf-8') as f:
+            writer = csv.writer(f)
+            writer.writerow(['URL', 'Feedback'])
+            writer.writerows(clean_dataset)
+            
+        print("\n" + "=" * 70)
+        print(f"🎯 COLLECTION MASS COMPLETED! Saved {len(clean_dataset)} Clean Rows.")
+        print(f"   Dataset saved to: {output_file}")
+        print("=" * 70)
+    else:
+        print("\n❌ Crawl structural execution failed. No links captured.")
 
 if __name__ == "__main__":
     asyncio.run(main())
