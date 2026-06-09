@@ -1,9 +1,12 @@
 """
 Rule-Based Classification for Ramraj Cotton Feedback
-Interactive testing - enter feedback, get department
+Enter feedback → Get department → Auto-save to CSV
 """
 
 import re
+import csv
+import os
+from datetime import datetime
 
 # Department keywords mapping
 DEPARTMENT_RULES = {
@@ -201,24 +204,19 @@ DEPARTMENT_RULES = {
 
 
 def keyword_match(text, keyword):
-    """
-    Exact phrase / word matching using regex boundaries.
-    """
-
+    """Exact phrase / word matching using regex boundaries."""
     pattern = r'\b' + re.escape(keyword.lower()) + r'\b'
     return re.search(pattern, text) is not None
 
 
 def classify_feedback(text):
-
+    """Classify feedback into department based on keyword matching"""
     if not text or len(text.strip()) < 3:
         return "Unclassified"
 
     text_lower = text.lower()
 
-    # ==================================
     # HIGH PRIORITY ACCOUNTS RULES
-    # ==================================
     accounts_priority = [
         'refund',
         'payment',
@@ -235,9 +233,7 @@ def classify_feedback(text):
         if keyword_match(text_lower, keyword):
             return "Accounts"
 
-    # ==================================
     # HIGH PRIORITY SALES RULES
-    # ==================================
     sales_priority = [
         'discount',
         'scheme',
@@ -250,9 +246,7 @@ def classify_feedback(text):
         if keyword_match(text_lower, keyword):
             return "Sales"
 
-    # ==================================
     # NORMAL PRIORITY ROUTING
-    # ==================================
     priority_order = [
         'Product Design',
         'Packaging',
@@ -262,30 +256,40 @@ def classify_feedback(text):
     ]
 
     for department in priority_order:
-
         for keyword in DEPARTMENT_RULES[department]['keywords']:
-
             if keyword_match(text_lower, keyword):
                 return department
 
     return "Customer Support"
 
 
-def main():
+def save_feedback(feedback, department):
+    """Save feedback and classified department to CSV file."""
+    file_name = "routed_feedback.csv"
+    file_exists = os.path.isfile(file_name)
 
+    with open(file_name, "a", newline="", encoding="utf-8") as file:
+        writer = csv.writer(file)
+        
+        if not file_exists:
+            writer.writerow(["Timestamp", "Feedback", "Department"])
+        
+        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        writer.writerow([timestamp, feedback, department])
+
+
+def main():
     print("=" * 60)
     print("RAMRAJ COTTON - FEEDBACK CLASSIFICATION SYSTEM")
     print("=" * 60)
-
     print("\nEnter customer feedback to see the routing department.")
     print("Type 'exit' or 'quit' to stop.\n")
 
     while True:
-
         feedback = input("Enter feedback: ").strip()
 
         if feedback.lower() in ['exit', 'quit', 'q']:
-            print("\nExiting system...")
+            print("\n✅ Exited. Thank you!")
             break
 
         if not feedback:
@@ -293,9 +297,14 @@ def main():
             continue
 
         department = classify_feedback(feedback)
-
-        print(f"Department: {department}\n")
+        
+        # Save to CSV
+        save_feedback(feedback, department)
+        
+        print(f"Department: {department}")
+        print("✅ Saved to routed_feedback.csv\n")
 
 
 if __name__ == "__main__":
     main()
+
