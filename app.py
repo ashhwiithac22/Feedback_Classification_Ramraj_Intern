@@ -7,7 +7,14 @@ import streamlit as st
 from sentence_transformers import SentenceTransformer
 from sklearn.metrics.pairwise import cosine_similarity
 import warnings
+import os
+import logging
+logging.getLogger("transformers").setLevel(logging.ERROR)
 warnings.filterwarnings('ignore')
+os.environ["TOKENIZERS_PARALLELISM"] = "false"
+os.environ["TRANSFORMERS_VERBOSITY"] = "error"
+os.environ["HF_HUB_DISABLE_SYMLINKS_WARNING"] = "1"
+
 
 # ============================================
 # PAGE CONFIGURATION
@@ -167,8 +174,8 @@ st.markdown("---")
 # Input section
 st.markdown("**Enter customer feedback:**")
 
-# SIMPLE text_area without problematic parameters
-feedback = st.text_area("", height=100)
+# FIXED: Added a proper label and hid it
+feedback = st.text_area("Feedback", height=100, label_visibility="collapsed", placeholder="Type or paste feedback here...")
 
 # Buttons
 col1, col2 = st.columns(2)
