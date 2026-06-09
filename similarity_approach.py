@@ -34,7 +34,9 @@ department_examples = {
         "tracking not working",
         "courier lost package",
         "received very late",
-        "shipment pending"
+        "shipment pending",
+        "OTP",
+        "delivery OTP"
     ],
     
     'Packaging': [
@@ -44,7 +46,12 @@ department_examples = {
         "wrong product packed",
         "box was open",
         "poor packaging",
-        "received wrong item"
+        "received wrong item",
+        "seal broken",
+        "used item",
+        "plastic cover",
+        "cover damaged",
+        "someone else's order"
     ],
     
     'Accounts': [
@@ -73,7 +80,9 @@ department_examples = {
         "length too long",
         "tight fit",
         "loose fit",
-        "size mismatch"
+        "size mismatch",
+        "fits like tent",
+        "loose stomach"
     ],
     
     'Customer Support': [
@@ -82,7 +91,9 @@ department_examples = {
         "issue unresolved",
         "staff rude",
         "customer care not responding",
-        "complaint not addressed"
+        "complaint not addressed",
+        "automated replies",
+        "no human response"
     ]
 }
 
