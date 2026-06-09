@@ -82,7 +82,8 @@ department_examples = {
         "loose fit",
         "size mismatch",
         "fits like tent",
-        "loose stomach"
+        "loose stomach",
+        "large size"
     ],
     
     'Customer Support': [
